@@ -1,0 +1,164 @@
+import React, { useState } from "react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Calendar } from "@/components/ui/calendar";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from "recharts";
+
+export default function ControlParentalApp() {
+  const [children, setChildren] = useState([]);
+  const [childName, setChildName] = useState("");
+
+  const addChild = () => {
+    if (childName.trim()) {
+      setChildren([
+        ...children,
+        {
+          name: childName,
+          records: [],
+          selectedDate: new Date(),
+          behavior: "bueno",
+          comment: ""
+        },
+      ]);
+      setChildName("");
+    }
+  };
+
+  const addRecord = (index) => {
+    const updatedChildren = [...children];
+    const child = updatedChildren[index];
+    child.records.push({
+      date: child.selectedDate.toISOString().split("T")[0],
+      behavior: child.behavior,
+      comment: child.comment,
+    });
+    child.comment = "";
+    setChildren(updatedChildren);
+  };
+
+  const updateChildField = (index, field, value) => {
+    const updatedChildren = [...children];
+    updatedChildren[index][field] = value;
+    setChildren(updatedChildren);
+  };
+
+  const behaviorColors = {
+    bueno: "text-green-600",
+    regular: "text-yellow-600",
+    equivocado: "text-red-600",
+  };
+
+  const generateStats = (records) => {
+    const summary = {
+      bueno: 0,
+      regular: 0,
+      equivocado: 0,
+    };
+    records.forEach((r) => {
+      summary[r.behavior] += 1;
+    });
+    const total = summary.bueno + summary.regular + summary.equivocado;
+    return [
+      { name: "Bueno", cantidad: summary.bueno, porcentaje: total ? ((summary.bueno / total) * 100).toFixed(1) + "%" : "0%" },
+      { name: "Regular", cantidad: summary.regular, porcentaje: total ? ((summary.regular / total) * 100).toFixed(1) + "%" : "0%" },
+      { name: "Equivocado", cantidad: summary.equivocado, porcentaje: total ? ((summary.equivocado / total) * 100).toFixed(1) + "%" : "0%" },
+    ];
+  };
+
+  const CustomTooltip = ({ active, payload, label }) => {
+    if (active && payload && payload.length) {
+      return (
+        <div className="bg-white border p-2 rounded shadow">
+          <p className="font-semibold">{label}</p>
+          <p>Cantidad: {payload[0].value}</p>
+          <p>Porcentaje: {payload[0].payload.porcentaje}</p>
+        </div>
+      );
+    }
+    return null;
+  };
+
+  return (
+    <div className="min-h-screen bg-blue-200 p-6">
+      <h1 className="text-3xl font-bold text-center mb-6">Control Parental</h1>
+
+      <div className="max-w-md mx-auto mb-6">
+        <input
+          type="text"
+          value={childName}
+          onChange={(e) => setChildName(e.target.value)}
+          placeholder="Nombre del hijo"
+          className="p-2 w-full rounded border mb-2"
+        />
+        <Button className="w-full" onClick={addChild}>Añadir hijo</Button>
+      </div>
+
+      <div className="grid gap-6">
+        {children.map((child, index) => (
+          <Card key={index} className="bg-white">
+            <CardContent className="p-4">
+              <h2 className="text-xl font-semibold mb-2">{child.name}</h2>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Calendar
+                  mode="single"
+                  selected={child.selectedDate}
+                  onSelect={(date) => updateChildField(index, "selectedDate", date || new Date())}
+                  className="rounded border"
+                />
+
+                <div>
+                  <select
+                    value={child.behavior}
+                    onChange={(e) => updateChildField(index, "behavior", e.target.value)}
+                    className="p-2 w-full border rounded mb-2"
+                  >
+                    <option value="bueno">Comportamiento Bueno</option>
+                    <option value="regular">Comportamiento Regular</option>
+                    <option value="equivocado">Comportamiento Equivocado</option>
+                  </select>
+                  <textarea
+                    value={child.comment}
+                    onChange={(e) => updateChildField(index, "comment", e.target.value)}
+                    placeholder="Comentario"
+                    className="p-2 w-full border rounded mb-2"
+                  ></textarea>
+                  <Button
+                    className="w-full"
+                    onClick={() => addRecord(index)}
+                  >
+                    Guardar Registro
+                  </Button>
+                </div>
+              </div>
+
+              <div className="mt-4">
+                <h3 className="font-semibold mb-2">Registros:</h3>
+                <ul className="list-disc pl-6">
+                  {child.records.map((r, i) => (
+                    <li key={i} className={`${behaviorColors[r.behavior]} text-sm`}>
+                      {r.date}: {r.behavior} - {r.comment}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              <div className="mt-6">
+                <h3 className="font-semibold mb-2">Estadísticas:</h3>
+                <ResponsiveContainer width="100%" height={250}>
+                  <BarChart data={generateStats(child.records)}>
+                    <XAxis dataKey="name" />
+                    <YAxis allowDecimals={false} />
+                    <Tooltip content={<CustomTooltip />} />
+                    <Legend />
+                    <Bar dataKey="cantidad" fill="#3B82F6" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}
