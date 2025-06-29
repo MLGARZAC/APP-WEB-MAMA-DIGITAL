@@ -45,7 +45,7 @@
         <header class="bg-white bg-opacity-70 backdrop-blur-sm rounded-lg shadow-md p-4 mb-6 flex justify-between items-center flex-wrap gap-2">
             <h1 class="text-2xl font-bold text-gray-800">Control Parental</h1>
             <div id="user-id-display" class="text-sm text-gray-600 hidden">
-                ID de Usuario: <span class="font-mono bg-gray-100 p-1 rounded break-all"></span>
+                <!-- El ID de usuario ya no es relevante sin autenticación de Firebase -->
             </div>
         </header>
 
@@ -54,46 +54,36 @@
         </div>
     </div>
 
-    <!-- Firebase SDKs -->
     <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, doc, addDoc, updateDoc, deleteDoc, onSnapshot, query, where, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        // --- Variables de Estado Globales (en memoria) ---
+        // Estas variables ahora almacenan los datos directamente en la memoria del navegador.
+        // Los datos se perderán al recargar o cerrar la página.
+        let children = []; // Lista de perfiles de hijos. Cada hijo tendrá una propiedad 'behaviorRecords'.
+        let selectedChild = null; // El hijo actualmente seleccionado para ver su perfil.
+        let currentPage = 'dashboard'; // Controla qué vista se muestra ('dashboard', 'childProfile', 'addChildren').
+        let currentCalendarMonth = new Date(); // Para la navegación del calendario.
 
-        // --- Variables de Estado Globales ---
-        // Estas variables simulan el estado de React en una aplicación de JavaScript puro
-        let db = null;
-        let auth = null;
-        let userId = null;
-        let isAuthReady = false;
-        let loading = true;
-        let children = []; // Lista de perfiles de hijos
-        let selectedChild = null; // El hijo actualmente seleccionado para ver su perfil
-        let currentPage = 'dashboard'; // Controla qué vista se muestra ('dashboard', 'childProfile', 'addChildren')
-        let currentCalendarMonth = new Date(); // Para la navegación del calendario
+        // Simula un ID de usuario fijo o generado, ya que no hay autenticación de Firebase.
+        // Este ID se usa para mantener la estructura de datos simulada coherente.
+        const userId = "simulated_user_id";
 
-        // --- Configuración de Firebase ---
-        // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-        // !!! ¡ATENCIÓN! DEBES REEMPLAZAR ESTOS VALORES CON TU PROPIA CONFIGURACIÓN DE FIREBASE !!!
-        // !!! Puedes encontrar esta información en la Consola de Firebase de tu proyecto (Configuración del proyecto -> Tus apps) !!!
-        // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-        const firebaseConfig = {
-             apiKey: "TU_API_KEY_DE_FIREBASE", // Ejemplo: "AIzaSyC..."
-             authDomain: "TU_AUTH_DOMAIN.firebaseapp.com", // Ejemplo: "mi-app-parental.firebaseapp.com"
-             projectId: "TU_PROJECT_ID", // Ejemplo: "mi-app-parental"
-             storageBucket: "TU_STORAGE_BUCKET.appspot.com", // Ejemplo: "mi-app-parental.appspot.com"
-             messagingSenderId: "TU_MESSAGING_SENDER_ID", // Ejemplo: "1234567890"
-             appId: "TU_APP_ID" // Ejemplo: "1:234567890:web:abcdef"
-        };
-
-        // Este 'appId' se utiliza para las rutas de las colecciones de Firestore (artifacts/{appId}/...).
-        // Si no tienes un __app_id definido por el entorno, usa el appId de tu firebaseConfig.
-        const appId = typeof __app_id !== 'undefined' ? __app_id : firebaseConfig.appId || "default-app-id";
-
-        // --- Funciones de Utilidad (Adaptadas de React) ---
+        // --- Funciones de Utilidad ---
 
         /**
-         * Muestra un modal de mensaje personalizado en lugar de alert().
+         * Genera un ID único simple para nuevos registros.
+         * En un entorno real, esto sería gestionado por la base de datos.
+         * @returns {string} Un ID único.
+         */
+        const generateUniqueId = () => {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                const r = Math.random() * 16 | 0,
+                      v = c === 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        };
+
+        /**
+         * Muestra un modal de mensaje personalizado.
          * @param {string} title - El título del modal.
          * @param {string} message - El mensaje a mostrar.
          */
@@ -150,7 +140,7 @@
 
         /**
          * Renderiza la interfaz de usuario principal de la aplicación.
-         * Se llama cada vez que el estado global de la aplicación (currentPage, loading, etc.) cambia.
+         * Se llama cada vez que el estado global de la aplicación (currentPage) cambia.
          */
         function renderApp() {
             const mainContent = document.getElementById('main-content');
@@ -158,32 +148,7 @@
 
             mainContent.innerHTML = ''; // Limpia el contenido anterior
 
-            if (loading) {
-                mainContent.innerHTML = `
-                    <div class="flex items-center justify-center min-h-[calc(100vh-160px)]"> <!-- Ajusta altura para centrar -->
-                        <div class="text-xl font-semibold text-gray-700">Cargando aplicación...</div>
-                    </div>
-                `;
-                return;
-            }
-
-            if (!isAuthReady) {
-                mainContent.innerHTML = `
-                    <div class="flex items-center justify-center min-h-[calc(100vh-160px)]"> <!-- Ajusta altura para centrar -->
-                        <div class="text-xl font-semibold text-red-700">Error: No se pudo autenticar.</div>
-                    </div>
-                `;
-                return;
-            }
-
-            // Muestra el ID de usuario en el encabezado
-            const userIdDisplay = document.getElementById('user-id-display');
-            if (userIdDisplay) {
-                userIdDisplay.classList.remove('hidden');
-                userIdDisplay.querySelector('span').textContent = userId;
-            }
-
-            // Renderiza el componente de página actual
+            // La app siempre está "lista" ya que no hay dependencias externas de carga/autenticación.
             if (currentPage === 'dashboard') {
                 renderDashboard(mainContent);
             } else if (currentPage === 'childProfile' && selectedChild) {
@@ -343,24 +308,34 @@
                 saveButtonText.textContent = 'Guardando...';
 
                 try {
-                    const childrenColRef = collection(db, `artifacts/${appId}/users/${userId}/children`);
-                    const childData = { name, dob, photoURL };
+                    const newChildData = {
+                        id: childToEdit ? childToEdit.id : generateUniqueId(),
+                        name,
+                        dob,
+                        photoURL,
+                        behaviorRecords: childToEdit ? childToEdit.behaviorRecords : [] // Mantener registros existentes o inicializar
+                    };
 
                     if (isEditMode) {
-                        const childDocRef = doc(db, `artifacts/${appId}/users/${userId}/children`, childToEdit.id);
-                        await updateDoc(childDocRef, childData);
-                        showMessage("Éxito", "Perfil del hijo actualizado correctamente.");
-                        // Actualiza el hijo seleccionado si es el que se está editando
-                        selectedChild = { id: childToEdit.id, ...childData };
+                        // Actualizar hijo en la lista global de hijos
+                        const childIndex = children.findIndex(c => c.id === newChildData.id);
+                        if (childIndex !== -1) {
+                            children[childIndex] = newChildData;
+                            showMessage("Éxito", "Perfil del hijo actualizado correctamente.");
+                        } else {
+                            throw new Error("Hijo no encontrado para actualizar.");
+                        }
+                        selectedChild = newChildData; // Actualiza el hijo seleccionado
                         currentPage = 'childProfile'; // Vuelve al perfil del hijo después de actualizar
                     } else {
-                        await addDoc(childrenColRef, childData);
+                        // Añadir nuevo hijo a la lista global
+                        children.push(newChildData);
                         showMessage("Éxito", "Perfil del hijo añadido correctamente.");
                         currentPage = 'dashboard';
                     }
                     renderApp(); // Vuelve a renderizar la aplicación para reflejar los cambios
                 } catch (err) {
-                    console.error("Error adding/updating child:", err);
+                    console.error("Error al añadir/actualizar hijo:", err);
                     formError.textContent = `Error al guardar el perfil: ${err.message}`;
                     formError.classList.remove('hidden');
                 } finally {
@@ -447,8 +422,7 @@
                 // Sobrescribe los manejadores de cancelar/guardar del formulario para cerrar el modal
                 document.getElementById('cancel-child-button').onclick = closeEditModal;
                 const formElement = document.getElementById('child-form');
-                const originalSubmitHandler = formElement.onsubmit; // Guarda el manejador original si lo hubiera
-                formElement.onsubmit = async (e) => {
+                formElement.onsubmit = async (e) => { // Asegúrate de que esto sea async
                     e.preventDefault(); // Previene la recarga por defecto
                     const nameInput = document.getElementById('name');
                     const dobInput = document.getElementById('dob');
@@ -465,20 +439,17 @@
                         return;
                     }
 
-                    // Ejecuta la lógica de guardado (similar a la original en AddChildForm)
-                    try {
-                        const childDocRef = doc(db, `artifacts/${appId}/users/${userId}/children`, child.id);
-                        const childData = { name, dob, photoURL };
-                        await updateDoc(childDocRef, childData);
-                        showMessage("Éxito", "Perfil del hijo actualizado correctamente.");
-                        selectedChild = { id: child.id, ...childData }; // Actualiza el hijo seleccionado
-                        closeEditModal(); // Cierra el modal solo si el guardado fue exitoso
-                        renderApp(); // Re-renderiza para actualizar el perfil en la vista
-                    } catch (err) {
-                        console.error("Error updating child:", err);
-                        formError.textContent = `Error al actualizar el perfil: ${err.message}`;
-                        formError.classList.remove('hidden');
+                    // Actualiza el hijo en la lista global
+                    const updatedChildData = { ...child, name, dob, photoURL };
+                    const childIndex = children.findIndex(c => c.id === updatedChildData.id);
+                    if (childIndex !== -1) {
+                        children[childIndex] = updatedChildData;
                     }
+
+                    showMessage("Éxito", "Perfil del hijo actualizado correctamente.");
+                    selectedChild = updatedChildData; // Actualiza el hijo seleccionado
+                    closeEditModal(); // Cierra el modal solo si el guardado fue exitoso
+                    renderApp(); // Re-renderiza para actualizar el perfil en la vista
                 };
             });
 
@@ -486,52 +457,23 @@
             document.getElementById('delete-profile-button').addEventListener('click', () => {
                 renderConfirmationModal(
                     "Confirmar Eliminación",
-                    `¿Estás seguro de que quieres eliminar el perfil de ${child.name} y todos sus registros de comportamiento? Esta acción es irreversible.`,
+                    `¿Estás seguro de que quieres eliminar el perfil de ${child.name}? Esta acción es irreversible y también eliminará sus registros de comportamiento.`,
                     async () => {
-                        try {
-                            // Primero elimina todos los registros de comportamiento asociados al hijo
-                            const behaviorQuery = query(
-                                collection(db, `artifacts/${appId}/users/${userId}/behavior`),
-                                where("childId", "==", child.id)
-                            );
-                            const behaviorSnapshot = await getDocs(behaviorQuery);
-                            const deletePromises = behaviorSnapshot.docs.map(doc => deleteDoc(doc.ref));
-                            await Promise.all(deletePromises);
-
-                            // Luego elimina el perfil del hijo
-                            const childDocRef = doc(db, `artifacts/${appId}/users/${userId}/children`, child.id);
-                            await deleteDoc(childDocRef);
-                            showMessage("Éxito", "Hijo y sus registros de comportamiento eliminados correctamente.");
-                            currentPage = 'dashboard';
-                            selectedChild = null;
-                            renderApp(); // Vuelve al dashboard después de eliminar
-                        } catch (error) {
-                            console.error("Error deleting child and behaviors:", error);
-                            showMessage("Error", `No se pudo eliminar el perfil: ${error.message}`);
-                        }
+                        // Elimina el hijo de la lista global de hijos
+                        children = children.filter(c => c.id !== child.id);
+                        showMessage("Éxito", "Hijo y sus registros de comportamiento eliminados correctamente.");
+                        currentPage = 'dashboard';
+                        selectedChild = null;
+                        renderApp(); // Vuelve al dashboard después de eliminar
                     },
                     () => { /* Acción de cancelar, no hace nada */ }
                 );
             });
 
-            // Escucha cambios en los registros de comportamiento para este hijo en tiempo real
-            const behaviorColRef = collection(db, `artifacts/${appId}/users/${userId}/behavior`);
-            const q = query(behaviorColRef, where("childId", "==", child.id));
-            onSnapshot(q, (snapshot) => {
-                const records = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                // Re-renderiza solo el calendario y las estadísticas si el hijo actual está seleccionado
-                if (selectedChild && selectedChild.id === child.id) {
-                    renderBehaviorCalendar(document.getElementById('behavior-calendar-container'), records);
-                    renderBehaviorStatistics(document.getElementById('behavior-statistics-container'), records);
-                }
-            }, (error) => {
-                console.error("Error fetching behavior records:", error);
-                showMessage("Error de Datos", "No se pudieron cargar los registros de comportamiento.");
-            });
-
-            // Renderiza el calendario y las estadísticas inicialmente
-            renderBehaviorCalendar(document.getElementById('behavior-calendar-container'), []); // Se llenará con onSnapshot
-            renderBehaviorStatistics(document.getElementById('behavior-statistics-container'), []); // Se llenará con onSnapshot
+            // Como no hay onSnapshot, renderizamos directamente con los registros del hijo
+            // que están en la memoria.
+            renderBehaviorCalendar(document.getElementById('behavior-calendar-container'), child.behaviorRecords || []);
+            renderBehaviorStatistics(document.getElementById('behavior-statistics-container'), child.behaviorRecords || []);
         }
 
         // --- Componente Behavior Calendar ---
@@ -560,7 +502,7 @@
             // Días del mes
             for (let day = 1; day <= totalDays; day++) {
                 const date = new Date(currentCalendarMonth.getFullYear(), currentCalendarMonth.getMonth(), day);
-                const dateString = date.toISOString().split('T')[0]; // Formato YYYY-MM-DD
+                const dateString = date.toISOString().split('T')[0]; // Formato sebagaimana-MM-DD
                 const dailyRecords = behaviorRecords.filter(record => record.date === dateString);
 
                 let bgColor = 'bg-white';
@@ -569,10 +511,10 @@
                 // Resume el comportamiento para el icono del calendario: Equivocado > Regular > Bueno
                 if (dailyRecords.some(rec => rec.type === 'Equivocado')) {
                     bgColor = 'bg-red-200';
-                    icon = '👎';
+                    icon = '�';
                 } else if (dailyRecords.some(rec => rec.type === 'Regular')) {
                     bgColor = 'bg-yellow-200';
-                    icon = '�';
+                    icon = '😐';
                 } else if (dailyRecords.some(rec => rec.type === 'Bueno')) {
                     bgColor = 'bg-green-200';
                     icon = '👍';
@@ -621,7 +563,7 @@
             container.querySelectorAll('[data-date]').forEach(dayDiv => {
                 dayDiv.addEventListener('click', () => {
                     const date = new Date(dayDiv.dataset.date + 'T12:00:00Z'); // Añade hora para evitar problemas de zona horaria
-                    const recordsForDate = behaviorRecords.filter(record => record.date === dayDiv.dataset.date);
+                    const recordsForDate = selectedChild.behaviorRecords.filter(record => record.date === dayDiv.dataset.date);
                     renderBehaviorFormModal(date, recordsForDate);
                 });
             });
@@ -723,6 +665,10 @@
                     </form>
                 </div>
             `;
+            // Cuidado: Al recrear el HTML, se pierden los listeners anteriores.
+            // Para asegurar que los listeners se adjunten correctamente, siempre adjúntalos DESPUÉS
+            // de que el HTML haya sido insertado en el DOM.
+            // El modalContainer ya está en el DOM porque se añadió al principio de esta función.
 
             let currentType = ''; // Estado local para el tipo de comportamiento seleccionado
             const commentInput = modalContainer.querySelector('#comment-input');
@@ -765,15 +711,24 @@
                 addSpinner.classList.remove('hidden');
 
                 try {
-                    const behaviorColRef = collection(db, `artifacts/${appId}/users/${userId}/behavior`);
-                    const recordData = {
+                    const newRecord = {
+                        id: generateUniqueId(),
                         childId: selectedChild.id,
                         date: selectedDate.toISOString().split('T')[0], // Formato YYYY-MM-DD
                         type: currentType,
                         comment: commentInput.value,
                         timestamp: new Date().toISOString(), // Para ordenar y seguimiento
                     };
-                    await addDoc(behaviorColRef, recordData); // Siempre añade un nuevo registro
+
+                    // Añadir el nuevo registro al array de behaviorRecords del hijo seleccionado
+                    selectedChild.behaviorRecords = [...selectedChild.behaviorRecords, newRecord];
+
+                    // Actualizar el hijo en la lista global de hijos (en memoria)
+                    const childIndex = children.findIndex(c => c.id === selectedChild.id);
+                    if (childIndex !== -1) {
+                        children[childIndex] = selectedChild;
+                    }
+
                     showMessage("Éxito", "Registro de comportamiento guardado.");
                     
                     // Limpia el formulario para la siguiente entrada
@@ -786,28 +741,15 @@
                         if (typeClass === 'Equivocado') btn.className = 'type-button py-2 px-4 rounded-lg font-semibold border-2 bg-red-100 text-red-700 border-red-200 hover:bg-red-200';
                     });
                     
-                    // Re-renderiza toda la aplicación para actualizar el calendario, las estadísticas
-                    // y los registros diarios en el modal (que se reabrirá con los datos actualizados).
-                    // Para que el modal se cierre y reabra con los datos frescos, debemos quitarlo y recrearlo.
-                    modalContainer.remove(); // Quita el modal actual
-                    // El onSnapshot en ChildProfile eventualmente llamará a renderApp,
-                    // y el clic en el día del calendario lo reabrirá con los datos actualizados.
-                    // Para una experiencia más fluida, podríamos llamar directamente a la función de apertura
-                    // del modal si no queremos un renderApp completo.
-                    const updatedRecordsForDate = children.find(c => c.id === selectedChild.id) // Encuentra el hijo actualizado
-                                                    ? (children.find(c => c.id === selectedChild.id).behaviorRecords || []).filter(rec => rec.date === selectedDate.toISOString().split('T')[0])
-                                                    : [];
-                    // Como los `behaviorRecords` son actualizados por `onSnapshot` globalmente,
-                    // podemos simplemente reabrir el modal y se autofiltrará.
-                    // Sin embargo, para evitar un doble renderizado o latencia, lo mejor es
-                    // que `renderApp` se encargue de todo. Por ahora, forzamos un re-render completo.
-                    // Una implementación más avanzada manejaría el estado del modal y los datos directamente
-                    // sin un `renderApp` completo aquí.
-                    renderApp(); // Esto recargará ChildProfile y activará la visualización del calendario
-                    // y sus propios onSnapshots, haciendo que el modal se reabra con datos frescos.
+                    // Re-renderiza el modal para que muestre los datos actualizados
+                    modalContainer.remove(); // Cierra el modal actual
+                    // Re-obtiene los registros del hijo para el día seleccionado (ahora actualizados en memoria)
+                    const recordsForDateToReopen = selectedChild.behaviorRecords.filter(record => record.date === selectedDate.toISOString().split('T')[0]);
+                    renderBehaviorFormModal(selectedDate, recordsForDateToReopen);
+
 
                 } catch (err) {
-                    console.error("Error saving behavior record:", err);
+                    console.error("Error al guardar registro de comportamiento:", err);
                     behaviorFormError.textContent = `Error al guardar el registro: ${err.message}`;
                     behaviorFormError.classList.remove('hidden');
                 } finally {
@@ -824,27 +766,36 @@
             // Manejadores para eliminar registros de comportamiento individuales
             modalContainer.querySelectorAll('.delete-record-button').forEach(button => {
                 button.addEventListener('click', async function() {
-                    const recordIdToDelete = this.dataset.recordId;
-                    addButton.disabled = true; // Deshabilita los botones durante la operación
-                    addSpinner.classList.add('hidden'); // Oculta el spinner de añadir si está visible, muestra el de eliminar si se desea
+                    const recordIdToDelete = this.dataset.recordId; // Acceso correcto a dataset.recordId
+                    
+                    // Actualiza el estado de los botones mientras se procesa
+                    const allButtons = modalContainer.querySelectorAll('button');
+                    allButtons.forEach(btn => btn.disabled = true);
+                    addSpinner.classList.remove('hidden');
 
                     try {
-                        const recordDocRef = doc(db, `artifacts/${appId}/users/${userId}/behavior`, recordIdToDelete);
-                        await deleteDoc(recordDocRef);
+                        // Eliminar el registro del array de behaviorRecords del hijo seleccionado
+                        selectedChild.behaviorRecords = selectedChild.behaviorRecords.filter(record => record.id !== recordIdToDelete);
+
+                        // Actualizar el hijo en la lista global de hijos (en memoria)
+                        const childIndex = children.findIndex(c => c.id === selectedChild.id);
+                        if (childIndex !== -1) {
+                            children[childIndex] = selectedChild;
+                        }
+
                         showMessage("Éxito", "Registro de comportamiento eliminado.");
                         
-                        // Después de eliminar, re-renderiza toda la aplicación para que se actualice el UI
-                        // El onSnapshot en ChildProfile se encargará de actualizar la lista de records.
+                        // Después de eliminar, re-renderiza el modal para que refleje los cambios
                         modalContainer.remove(); // Cierra el modal actual
-                        renderApp(); // Re-renderiza para actualizar el perfil y el calendario/estadísticas
-                        // El modal se reabrirá automáticamente al renderizarse la fecha del calendario si sigue seleccionada.
+                        const recordsForDateToReopen = selectedChild.behaviorRecords.filter(record => record.date === selectedDate.toISOString().split('T')[0]);
+                        renderBehaviorFormModal(selectedDate, recordsForDateToReopen);
 
                     } catch (err) {
-                        console.error("Error deleting behavior record:", err);
+                        console.error("Error al eliminar registro de comportamiento:", err);
                         showMessage("Error", `Error al eliminar el registro: ${err.message}`);
                     } finally {
-                        addButton.disabled = false;
-                        // addSpinner.classList.add('hidden'); // Asegura que el spinner de añadir esté oculto
+                        allButtons.forEach(btn => btn.disabled = false);
+                        addSpinner.classList.add('hidden');
                     }
                 });
             });
@@ -868,7 +819,7 @@
                 records.forEach(record => {
                     const recordDate = new Date(record.date);
                     if (isNaN(recordDate.getTime())) { // Usa .getTime() para una validación más robusta
-                        console.warn(`Invalid date format for record: ${record.date}`);
+                        console.warn(`Formato de fecha inválido para el registro: ${record.date}`);
                         return;
                     }
 
@@ -996,77 +947,17 @@
         }
 
 
-        // --- Inicialización de Firebase y Listener de Autenticación ---
+        // --- Inicialización de la Aplicación (sin Firebase) ---
         // Se ejecuta una vez que el DOM está completamente cargado
-        document.addEventListener('DOMContentLoaded', async () => {
-            try {
-                // Validación de firebaseConfig.apiKey antes de inicializar la app
-                if (!firebaseConfig.apiKey || firebaseConfig.apiKey === "TU_API_KEY_DE_FIREBASE") {
-                    showMessage("Error de Configuración", "La configuración de Firebase está incompleta o es incorrecta. Por favor, reemplaza 'TU_API_KEY_DE_FIREBASE' y otros marcadores de posición con tus propias credenciales de Firebase en el código fuente.");
-                    loading = false;
-                    renderApp(); // Renderiza la app para mostrar el error al usuario.
-                    return; // Detiene la ejecución si la API key no es válida
-                }
-
-                // Inicializa la aplicación Firebase
-                const app = initializeApp(firebaseConfig);
-                db = getFirestore(app);
-                auth = getAuth(app);
-
-                // Escucha cambios en el estado de autenticación
-                onAuthStateChanged(auth, async (user) => {
-                    if (user) {
-                        userId = user.uid;
-                        isAuthReady = true;
-                        loading = false; // La autenticación ha terminado
-                    } else {
-                        // Si no hay un usuario autenticado, intenta iniciar sesión anónimamente
-                        // __initial_auth_token es una variable global proporcionada por el entorno de Canvas.
-                        // Si se ejecuta de forma independiente (ej. en GitHub Pages), no estará definida.
-                        if (typeof __initial_auth_token === 'undefined') {
-                            try {
-                                const anonUserCredential = await signInAnonymously(auth);
-                                userId = anonUserCredential.user.uid;
-                                isAuthReady = true;
-                            } catch (anonError) {
-                                console.error("Error signing in anonymously:", anonError);
-                                showMessage("Error de Autenticación", "No se pudo iniciar sesión anónimamente. Por favor, revisa tu clave API y configuración de Firebase.");
-                                isAuthReady = false;
-                            } finally {
-                                loading = false;
-                            }
-                        } else {
-                            // Si se proporciona un token de autenticación personalizado
-                            try {
-                                await signInWithCustomToken(auth, __initial_auth_token);
-                            } catch (tokenError) {
-                                console.error("Error signing in with custom token:", tokenError);
-                                showMessage("Error de Autenticación", "No se pudo iniciar sesión con el token proporcionado. Por favor, revisa tu clave API y configuración de Firebase.");
-                            } finally {
-                                loading = false;
-                            }
-                        }
-                    }
-                    renderApp(); // Renderiza la aplicación después de que se determine el estado de autenticación
-
-                    // Si Firebase y el usuario están listos, suscribe a los cambios en los perfiles de los hijos
-                    if (db && userId && isAuthReady) {
-                        const childrenColRef = collection(db, `artifacts/${appId}/users/${userId}/children`);
-                        onSnapshot(childrenColRef, (snapshot) => {
-                            children = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                            renderApp(); // Vuelve a renderizar la aplicación cada vez que los datos de los hijos cambian
-                        }, (error) => {
-                            console.error("Error fetching children:", error);
-                            showMessage("Error de Datos", "No se pudieron cargar los perfiles de los hijos.");
-                        });
-                    }
-                });
-            } catch (error) {
-                console.error("Failed to initialize Firebase:", error);
-                showMessage("Error de Inicialización", "No se pudo inicializar la aplicación. Intente de nuevo. Asegúrate de que tu configuración de Firebase sea correcta.");
-                loading = false; // Asegura que el estado de carga se establezca en false incluso en caso de error
-                renderApp();
+        document.addEventListener('DOMContentLoaded', () => {
+            // No hay inicialización de Firebase ni lógica de autenticación.
+            // La aplicación se considera lista inmediatamente.
+            // Ocultar la visualización del ID de usuario ya que no tiene sentido aquí.
+            const userIdDisplay = document.getElementById('user-id-display');
+            if (userIdDisplay) {
+                userIdDisplay.classList.add('hidden');
             }
+            renderApp(); // Renderiza la aplicación.
         });
     </script>
 </body>
