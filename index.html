@@ -1,164 +1,945 @@
-import React, { useState } from "react";
-import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Calendar } from "@/components/ui/calendar";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import React, { useState, useEffect, createContext, useContext } from 'react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, collection, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot, query, where, getDocs } from 'firebase/firestore';
 
-export default function ControlParentalApp() {
-  const [children, setChildren] = useState([]);
-  const [childName, setChildName] = useState("");
+// Define context for Firebase and Auth
+const AppContext = createContext(null);
 
-  const addChild = () => {
-    if (childName.trim()) {
-      setChildren([
-        ...children,
-        {
-          name: childName,
-          records: [],
-          selectedDate: new Date(),
-          behavior: "bueno",
-          comment: ""
-        },
-      ]);
-      setChildName("");
-    }
-  };
-
-  const addRecord = (index) => {
-    const updatedChildren = [...children];
-    const child = updatedChildren[index];
-    child.records.push({
-      date: child.selectedDate.toISOString().split("T")[0],
-      behavior: child.behavior,
-      comment: child.comment,
-    });
-    child.comment = "";
-    setChildren(updatedChildren);
-  };
-
-  const updateChildField = (index, field, value) => {
-    const updatedChildren = [...children];
-    updatedChildren[index][field] = value;
-    setChildren(updatedChildren);
-  };
-
-  const behaviorColors = {
-    bueno: "text-green-600",
-    regular: "text-yellow-600",
-    equivocado: "text-red-600",
-  };
-
-  const generateStats = (records) => {
-    const summary = {
-      bueno: 0,
-      regular: 0,
-      equivocado: 0,
-    };
-    records.forEach((r) => {
-      summary[r.behavior] += 1;
-    });
-    const total = summary.bueno + summary.regular + summary.equivocado;
-    return [
-      { name: "Bueno", cantidad: summary.bueno, porcentaje: total ? ((summary.bueno / total) * 100).toFixed(1) + "%" : "0%" },
-      { name: "Regular", cantidad: summary.regular, porcentaje: total ? ((summary.regular / total) * 100).toFixed(1) + "%" : "0%" },
-      { name: "Equivocado", cantidad: summary.equivocado, porcentaje: total ? ((summary.equivocado / total) * 100).toFixed(1) + "%" : "0%" },
-    ];
-  };
-
-  const CustomTooltip = ({ active, payload, label }) => {
-    if (active && payload && payload.length) {
-      return (
-        <div className="bg-white border p-2 rounded shadow">
-          <p className="font-semibold">{label}</p>
-          <p>Cantidad: {payload[0].value}</p>
-          <p>Porcentaje: {payload[0].payload.porcentaje}</p>
+// Utility function for custom modal/message box
+const showMessage = (title, message) => {
+    const modal = document.createElement('div');
+    modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50';
+    modal.innerHTML = `
+        <div class="bg-white p-6 rounded-lg shadow-xl max-w-sm w-full text-center">
+            <h3 class="text-lg font-bold mb-4">${title}</h3>
+            <p class="text-gray-700 mb-6">${message}</p>
+            <button id="modal-close-button" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-lg focus:outline-none focus:shadow-outline">Cerrar</button>
         </div>
-      );
-    }
-    return null;
-  };
+    `;
+    document.body.appendChild(modal);
 
-  return (
-    <div className="min-h-screen bg-blue-200 p-6">
-      <h1 className="text-3xl font-bold text-center mb-6">Control Parental</h1>
+    document.getElementById('modal-close-button').onclick = () => {
+        document.body.removeChild(modal);
+    };
+};
 
-      <div className="max-w-md mx-auto mb-6">
-        <input
-          type="text"
-          value={childName}
-          onChange={(e) => setChildName(e.target.value)}
-          placeholder="Nombre del hijo"
-          className="p-2 w-full rounded border mb-2"
-        />
-        <Button className="w-full" onClick={addChild}>Añadir hijo</Button>
-      </div>
-
-      <div className="grid gap-6">
-        {children.map((child, index) => (
-          <Card key={index} className="bg-white">
-            <CardContent className="p-4">
-              <h2 className="text-xl font-semibold mb-2">{child.name}</h2>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Calendar
-                  mode="single"
-                  selected={child.selectedDate}
-                  onSelect={(date) => updateChildField(index, "selectedDate", date || new Date())}
-                  className="rounded border"
-                />
-
-                <div>
-                  <select
-                    value={child.behavior}
-                    onChange={(e) => updateChildField(index, "behavior", e.target.value)}
-                    className="p-2 w-full border rounded mb-2"
-                  >
-                    <option value="bueno">Comportamiento Bueno</option>
-                    <option value="regular">Comportamiento Regular</option>
-                    <option value="equivocado">Comportamiento Equivocado</option>
-                  </select>
-                  <textarea
-                    value={child.comment}
-                    onChange={(e) => updateChildField(index, "comment", e.target.value)}
-                    placeholder="Comentario"
-                    className="p-2 w-full border rounded mb-2"
-                  ></textarea>
-                  <Button
-                    className="w-full"
-                    onClick={() => addRecord(index)}
-                  >
-                    Guardar Registro
-                  </Button>
+const ConfirmationModal = ({ title, message, onConfirm, onCancel }) => {
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white p-6 rounded-lg shadow-xl max-w-sm w-full text-center">
+                <h3 className="text-lg font-bold mb-4">${title}</h3>
+                <p className="text-gray-700 mb-6">${message}</p>
+                <div className="flex justify-around">
+                    <button
+                        onClick={onConfirm}
+                        className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg focus:outline-none focus:shadow-outline"
+                    >
+                        Confirmar
+                    </button>
+                    <button
+                        onClick={onCancel}
+                        className="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-lg focus:outline-none focus:shadow-outline"
+                    >
+                        Cancelar
+                    </button>
                 </div>
-              </div>
+            </div>
+        </div>
+    );
+};
 
-              <div className="mt-4">
-                <h3 className="font-semibold mb-2">Registros:</h3>
-                <ul className="list-disc pl-6">
-                  {child.records.map((r, i) => (
-                    <li key={i} className={`${behaviorColors[r.behavior]} text-sm`}>
-                      {r.date}: {r.behavior} - {r.comment}
-                    </li>
-                  ))}
-                </ul>
-              </div>
 
-              <div className="mt-6">
-                <h3 className="font-semibold mb-2">Estadísticas:</h3>
-                <ResponsiveContainer width="100%" height={250}>
-                  <BarChart data={generateStats(child.records)}>
-                    <XAxis dataKey="name" />
-                    <YAxis allowDecimals={false} />
-                    <Tooltip content={<CustomTooltip />} />
-                    <Legend />
-                    <Bar dataKey="cantidad" fill="#3B82F6" />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-    </div>
-  );
-}
+// Main App Component
+const App = () => {
+    // State for Firebase instances and user info
+    const [db, setDb] = useState(null);
+    const [auth, setAuth] = useState(null);
+    const [userId, setUserId] = useState(null);
+    const [isAuthReady, setIsAuthReady] = useState(false);
+    const [loading, setLoading] = useState(true);
+    const [children, setChildren] = useState([]);
+    const [selectedChild, setSelectedChild] = useState(null);
+    const [currentPage, setCurrentPage] = useState('dashboard'); // 'dashboard', 'childProfile', 'addChildren'
+
+    // Firebase Initialization and Authentication
+    useEffect(() => {
+        try {
+            // Get app ID and firebase config from global variables
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+            const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+
+            if (!firebaseConfig.apiKey) {
+                console.error("Firebase config is missing API key. Please check __firebase_config.");
+                showMessage("Error de Configuración", "La configuración de Firebase no es válida. Contacte al soporte.");
+                setLoading(false);
+                return;
+            }
+
+            const app = initializeApp(firebaseConfig);
+            const firestore = getFirestore(app);
+            const authInstance = getAuth(app);
+
+            setDb(firestore);
+            setAuth(authInstance);
+
+            const unsubscribe = onAuthStateChanged(authInstance, async (user) => {
+                if (user) {
+                    setUserId(user.uid);
+                    setIsAuthReady(true);
+                    setLoading(false);
+                } else {
+                    // Sign in anonymously if no existing user and no custom token
+                    if (typeof __initial_auth_token === 'undefined') {
+                        try {
+                            const anonUserCredential = await signInAnonymously(authInstance);
+                            setUserId(anonUserCredential.user.uid);
+                            setIsAuthReady(true);
+                        } catch (anonError) {
+                            console.error("Error signing in anonymously:", anonError);
+                            showMessage("Error de Autenticación", "No se pudo iniciar sesión anónimamente.");
+                            setIsAuthReady(false);
+                        } finally {
+                            setLoading(false);
+                        }
+                    } else {
+                        // Use initial auth token if provided
+                        try {
+                            await signInWithCustomToken(authInstance, __initial_auth_token);
+                        } catch (tokenError) {
+                            console.error("Error signing in with custom token:", tokenError);
+                            showMessage("Error de Autenticación", "No se pudo iniciar sesión con el token proporcionado.");
+                        } finally {
+                            setLoading(false);
+                        }
+                    }
+                }
+            });
+
+            return () => unsubscribe(); // Cleanup auth listener
+        } catch (error) {
+            console.error("Failed to initialize Firebase:", error);
+            showMessage("Error de Inicialización", "No se pudo inicializar la aplicación. Intente de nuevo.");
+            setLoading(false);
+        }
+    }, []);
+
+    // Fetch children profiles once auth is ready
+    useEffect(() => {
+        if (db && userId && isAuthReady) {
+            const childrenColRef = collection(db, `artifacts/${typeof __app_id !== 'undefined' ? __app_id : 'default-app-id'}/users/${userId}/children`);
+            const unsubscribe = onSnapshot(childrenColRef, (snapshot) => {
+                const childrenData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                setChildren(childrenData);
+            }, (error) => {
+                console.error("Error fetching children:", error);
+                showMessage("Error de Datos", "No se pudieron cargar los perfiles de los hijos.");
+            });
+            return () => unsubscribe(); // Cleanup snapshot listener
+        }
+    }, [db, userId, isAuthReady]);
+
+    const handleSelectChild = (child) => {
+        setSelectedChild(child);
+        setCurrentPage('childProfile');
+    };
+
+    const handleGoToDashboard = () => {
+        setSelectedChild(null);
+        setCurrentPage('dashboard');
+    };
+
+    const handleAddChildClick = () => {
+        setCurrentPage('addChildren');
+    };
+
+    const handleChildAdded = () => {
+        setCurrentPage('dashboard');
+    };
+
+    if (loading) {
+        return (
+            <div className="min-h-screen bg-sky-200 flex items-center justify-center">
+                <div className="text-xl font-semibold text-gray-700">Cargando aplicación...</div>
+            </div>
+        );
+    }
+
+    if (!isAuthReady) {
+        return (
+            <div className="min-h-screen bg-sky-200 flex items-center justify-center">
+                <div className="text-xl font-semibold text-red-700">Error: No se pudo autenticar.</div>
+            </div>
+        );
+    }
+
+    return (
+        <AppContext.Provider value={{ db, auth, userId, isAuthReady }}>
+            <div className="min-h-screen bg-sky-200 p-4 font-inter">
+                <header className="bg-white bg-opacity-70 backdrop-blur-sm rounded-lg shadow-md p-4 mb-6 flex justify-between items-center flex-wrap gap-2">
+                    <h1 className="text-2xl font-bold text-gray-800">Control Parental</h1>
+                    {userId && (
+                        <div className="text-sm text-gray-600">
+                            ID de Usuario: <span className="font-mono bg-gray-100 p-1 rounded break-all">{userId}</span>
+                        </div>
+                    )}
+                </header>
+
+                {currentPage === 'dashboard' && (
+                    <Dashboard
+                        children={children}
+                        onSelectChild={handleSelectChild}
+                        onAddChildClick={handleAddChildClick}
+                    />
+                )}
+
+                {currentPage === 'childProfile' && selectedChild && (
+                    <ChildProfile
+                        child={selectedChild}
+                        onBack={handleGoToDashboard}
+                        onChildUpdated={(updatedChild) => {
+                            setChildren(children.map(c => c.id === updatedChild.id ? updatedChild : c));
+                            setSelectedChild(updatedChild); // Ensure selected child is updated
+                        }}
+                        onChildDeleted={() => setCurrentPage('dashboard')}
+                    />
+                )}
+
+                {currentPage === 'addChildren' && (
+                    <AddChildForm
+                        onChildAdded={handleChildAdded}
+                        onCancel={() => setCurrentPage('dashboard')}
+                    />
+                )}
+            </div>
+        </AppContext.Provider>
+    );
+};
+
+// Dashboard Component
+const Dashboard = ({ children, onSelectChild, onAddChildClick }) => {
+    return (
+        <div className="bg-white bg-opacity-80 rounded-lg shadow-xl p-6 md:p-8 max-w-4xl mx-auto">
+            <h2 className="text-xl md:text-2xl font-semibold text-gray-800 mb-6">Perfiles de Hijos</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+                {children.length > 0 ? (
+                    children.map(child => (
+                        <div
+                            key={child.id}
+                            className="bg-blue-100 border border-blue-200 rounded-lg p-5 flex flex-col items-center shadow-md hover:shadow-lg transition-shadow duration-300 cursor-pointer"
+                            onClick={() => onSelectChild(child)}
+                        >
+                            <img
+                                src={child.photoURL || `https://placehold.co/100x100/AEC6CF/FFFFFF?text=${child.name.charAt(0).toUpperCase()}`}
+                                alt={child.name}
+                                className="w-24 h-24 rounded-full object-cover mb-4 border-2 border-blue-400 shadow-sm"
+                                onError={(e) => e.target.src = `https://placehold.co/100x100/AEC6CF/FFFFFF?text=${child.name.charAt(0).toUpperCase()}`}
+                            />
+                            <h3 className="text-lg font-bold text-gray-900 mb-1">{child.name}</h3>
+                            <p className="text-sm text-gray-600">Edad: {new Date().getFullYear() - new Date(child.dob).getFullYear()}</p>
+                        </div>
+                    ))
+                ) : (
+                    <p className="col-span-full text-center text-gray-600">No hay perfiles de hijos. ¡Añade uno!</p>
+                )}
+            </div>
+            <button
+                onClick={onAddChildClick}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg shadow-lg transition duration-300 ease-in-out transform hover:scale-105 flex items-center justify-center gap-2"
+            >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                </svg>
+                Añadir Nuevo Hijo
+            </button>
+        </div>
+    );
+};
+
+// Add/Edit Child Form Component
+const AddChildForm = ({ onChildAdded, onCancel, childToEdit = null, onChildUpdated }) => {
+    const { db, userId } = useContext(AppContext);
+    const [name, setName] = useState(childToEdit ? childToEdit.name : '');
+    const [dob, setDob] = useState(childToEdit ? childToEdit.dob : '');
+    const [photoURL, setPhotoURL] = useState(childToEdit ? childToEdit.photoURL : '');
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        setError('');
+        if (!name || !dob) {
+            setError('Por favor, completa todos los campos requeridos.');
+            return;
+        }
+
+        setLoading(true);
+        try {
+            const childrenColRef = collection(db, `artifacts/${typeof __app_id !== 'undefined' ? __app_id : 'default-app-id'}/users/${userId}/children`);
+            const childData = { name, dob, photoURL };
+
+            if (childToEdit) {
+                // Update existing child
+                const childDocRef = doc(db, `artifacts/${typeof __app_id !== 'undefined' ? __app_id : 'default-app-id'}/users/${userId}/children`, childToEdit.id);
+                await updateDoc(childDocRef, childData);
+                onChildUpdated({ id: childToEdit.id, ...childData });
+                showMessage("Éxito", "Perfil del hijo actualizado correctamente.");
+            } else {
+                // Add new child
+                await addDoc(childrenColRef, childData);
+                onChildAdded();
+                showMessage("Éxito", "Perfil del hijo añadido correctamente.");
+            }
+        } catch (err) {
+            console.error("Error adding/updating child:", err);
+            setError(`Error al guardar el perfil: ${err.message}`);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    return (
+        <div className="bg-white bg-opacity-80 rounded-lg shadow-xl p-6 md:p-8 max-w-lg mx-auto">
+            <h2 className="text-xl md:text-2xl font-semibold text-gray-800 mb-6">{childToEdit ? 'Editar Perfil del Hijo' : 'Añadir Nuevo Hijo'}</h2>
+            <form onSubmit={handleSubmit} className="space-y-4">
+                <div>
+                    <label htmlFor="name" className="block text-gray-700 text-sm font-bold mb-2">
+                        Nombre del Hijo:
+                    </label>
+                    <input
+                        type="text"
+                        id="name"
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        className="shadow appearance-none border rounded-lg w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-400"
+                        placeholder="Ej. Juanito"
+                        required
+                    />
+                </div>
+                <div>
+                    <label htmlFor="dob" className="block text-gray-700 text-sm font-bold mb-2">
+                        Fecha de Nacimiento:
+                    </label>
+                    <input
+                        type="date"
+                        id="dob"
+                        value={dob}
+                        onChange={(e) => setDob(e.target.value)}
+                        className="shadow appearance-none border rounded-lg w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-400"
+                        required
+                    />
+                </div>
+                <div>
+                    <label htmlFor="photoURL" className="block text-gray-700 text-sm font-bold mb-2">
+                        URL de la Foto (opcional):
+                    </label>
+                    <input
+                        type="url"
+                        id="photoURL"
+                        value={photoURL}
+                        onChange={(e) => setPhotoURL(e.target.value)}
+                        className="shadow appearance-none border rounded-lg w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-400"
+                        placeholder="https://ejemplo.com/foto.jpg"
+                    />
+                </div>
+                {error && <p className="text-red-500 text-sm italic">{error}</p>}
+                <div className="flex justify-end gap-4 mt-6">
+                    <button
+                        type="button"
+                        onClick={onCancel}
+                        className="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-lg shadow-md transition duration-300 ease-in-out"
+                        disabled={loading}
+                    >
+                        Cancelar
+                    </button>
+                    <button
+                        type="submit"
+                        className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg shadow-md transition duration-300 ease-in-out flex items-center gap-2"
+                        disabled={loading}
+                    >
+                        {loading && (
+                            <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                        )}
+                        {childToEdit ? 'Actualizar Perfil' : 'Añadir Hijo'}
+                    </button>
+                </div>
+            </form>
+        </div>
+    );
+};
+
+// Child Profile View Component
+const ChildProfile = ({ child, onBack, onChildUpdated, onChildDeleted }) => {
+    const { db, userId } = useContext(AppContext);
+    const [behaviorRecords, setBehaviorRecords] = useState([]);
+    const [showBehaviorModal, setShowBehaviorModal] = useState(false);
+    const [selectedDateForBehavior, setSelectedDateForBehavior] = useState(null);
+    const [dailyBehaviorRecords, setDailyBehaviorRecords] = useState([]); // New state for records of the selected day
+    const [showEditChildModal, setShowEditChildModal] = useState(false);
+    const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
+
+    // Fetch behavior records for the selected child
+    useEffect(() => {
+        if (db && userId && child?.id) {
+            const behaviorColRef = collection(db, `artifacts/${typeof __app_id !== 'undefined' ? __app_id : 'default-app-id'}/users/${userId}/behavior`);
+            const q = query(behaviorColRef, where("childId", "==", child.id));
+            const unsubscribe = onSnapshot(q, (snapshot) => {
+                const records = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                setBehaviorRecords(records);
+            }, (error) => {
+                console.error("Error fetching behavior records:", error);
+                showMessage("Error de Datos", "No se pudieron cargar los registros de comportamiento.");
+            });
+            return () => unsubscribe();
+        }
+    }, [db, userId, child]);
+
+    const handleDateClick = (date) => {
+        setSelectedDateForBehavior(date);
+        // Filter records for the selected date
+        const recordsForDate = behaviorRecords.filter(rec => {
+            const recordDate = new Date(rec.date).toISOString().split('T')[0];
+            const clickedDate = date.toISOString().split('T')[0];
+            return recordDate === clickedDate;
+        });
+        setDailyBehaviorRecords(recordsForDate); // Set daily records for modal display
+        setShowBehaviorModal(true);
+    };
+
+    const handleDeleteChild = async () => {
+        setShowDeleteConfirmation(false); // Hide confirmation modal
+        if (!db || !userId || !child?.id) return;
+
+        try {
+            // Delete behavior records first
+            const behaviorQuery = query(
+                collection(db, `artifacts/${typeof __app_id !== 'undefined' ? __app_id : 'default-app-id'}/users/${userId}/behavior`),
+                where("childId", "==", child.id)
+            );
+            const behaviorSnapshot = await getDocs(behaviorQuery);
+            const deletePromises = behaviorSnapshot.docs.map(doc => deleteDoc(doc.ref));
+            await Promise.all(deletePromises);
+
+            // Then delete the child profile
+            const childDocRef = doc(db, `artifacts/${typeof __app_id !== 'undefined' ? __app_id : 'default-app-id'}/users/${userId}/children`, child.id);
+            await deleteDoc(childDocRef);
+            onChildDeleted();
+            showMessage("Éxito", "Hijo y sus registros de comportamiento eliminados correctamente.");
+        } catch (error) {
+            console.error("Error deleting child and behaviors:", error);
+            showMessage("Error", `No se pudo eliminar el perfil: ${error.message}`);
+        }
+    };
+
+    return (
+        <div className="bg-white bg-opacity-80 rounded-lg shadow-xl p-6 md:p-8 max-w-4xl mx-auto">
+            <div className="flex items-center mb-6">
+                <button
+                    onClick={onBack}
+                    className="flex items-center text-blue-600 hover:text-blue-800 font-semibold transition duration-300 mr-4"
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                    </svg>
+                    Volver
+                </button>
+                <img
+                    src={child.photoURL || `https://placehold.co/80x80/AEC6CF/FFFFFF?text=${child.name.charAt(0).toUpperCase()}`}
+                    alt={child.name}
+                    className="w-20 h-20 rounded-full object-cover mr-4 border-2 border-blue-400 shadow-sm"
+                    onError={(e) => e.target.src = `https://placehold.co/80x80/AEC6CF/FFFFFF?text=${child.name.charAt(0).toUpperCase()}`}
+                />
+                <h2 className="text-xl md:text-2xl font-bold text-gray-800">{child.name}</h2>
+            </div>
+
+            <div className="flex justify-end gap-4 mb-6">
+                <button
+                    onClick={() => setShowEditChildModal(true)}
+                    className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-lg shadow-md transition duration-300"
+                >
+                    Editar Perfil
+                </button>
+                <button
+                    onClick={() => setShowDeleteConfirmation(true)}
+                    className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg shadow-md transition duration-300"
+                >
+                    Eliminar Perfil
+                </button>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <div>
+                    <h3 className="text-xl font-semibold text-gray-800 mb-4">Registro de Comportamiento</h3>
+                    <BehaviorCalendar
+                        behaviorRecords={behaviorRecords}
+                        onDateClick={handleDateClick}
+                    />
+                </div>
+                <div>
+                    <h3 className="text-xl font-semibold text-gray-800 mb-4">Estadísticas de Comportamiento</h3>
+                    <BehaviorStatistics records={behaviorRecords} />
+                </div>
+            </div>
+
+            {showBehaviorModal && (
+                <BehaviorForm
+                    childId={child.id}
+                    selectedDate={selectedDateForBehavior}
+                    onClose={() => setShowBehaviorModal(false)}
+                    dailyRecords={dailyBehaviorRecords} // Pass all records for the day
+                />
+            )}
+
+            {showEditChildModal && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+                    <AddChildForm
+                        childToEdit={child}
+                        onChildUpdated={(updatedChild) => {
+                            onChildUpdated(updatedChild);
+                            setShowEditChildModal(false);
+                        }}
+                        onCancel={() => setShowEditChildModal(false)}
+                    />
+                </div>
+            )}
+
+            {showDeleteConfirmation && (
+                <ConfirmationModal
+                    title="Confirmar Eliminación"
+                    message={`¿Estás seguro de que quieres eliminar el perfil de ${child.name} y todos sus registros de comportamiento? Esta acción es irreversible.`}
+                    onConfirm={handleDeleteChild}
+                    onCancel={() => setShowDeleteConfirmation(false)}
+                />
+            )}
+        </div>
+    );
+};
+
+// Behavior Calendar Component
+const BehaviorCalendar = ({ behaviorRecords, onDateClick }) => {
+    const [currentMonth, setCurrentMonth] = useState(new Date());
+
+    const daysInMonth = (year, month) => new Date(year, month + 1, 0).getDate();
+    const firstDayOfMonth = (year, month) => new Date(year, month, 1).getDay(); // 0 for Sunday, 1 for Monday
+
+    const totalDays = daysInMonth(currentMonth.getFullYear(), currentMonth.getMonth());
+    const firstDay = firstDayOfMonth(currentMonth.getFullYear(), currentMonth.getMonth()); // 0-6, adjust for Monday start if needed
+
+    // Adjust firstDay to be 0 for Monday, 6 for Sunday
+    const adjustedFirstDay = (firstDay === 0) ? 6 : firstDay - 1; // If Sunday (0), make it 6 (end of week), otherwise subtract 1
+
+    const days = Array.from({ length: totalDays }, (_, i) => i + 1);
+    const blanks = Array.from({ length: adjustedFirstDay }, (_, i) => i);
+
+    const getBehaviorForDate = (date) => {
+        const dateString = date.toISOString().split('T')[0];
+        // For calendar display, we'll pick the 'worst' behavior of the day if multiple, or just the first if good.
+        // A simple approach is to prioritize Equivocado > Regular > Bueno
+        const dailyRecords = behaviorRecords.filter(record => new Date(record.date).toISOString().split('T')[0] === dateString);
+        if (dailyRecords.some(rec => rec.type === 'Equivocado')) return { type: 'Equivocado' };
+        if (dailyRecords.some(rec => rec.type === 'Regular')) return { type: 'Regular' };
+        if (dailyRecords.some(rec => rec.type === 'Bueno')) return { type: 'Bueno' };
+        return null;
+    };
+
+    const prevMonth = () => {
+        setCurrentMonth(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
+    };
+
+    const nextMonth = () => {
+        setCurrentMonth(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
+    };
+
+    const monthNames = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+    const dayNames = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
+
+    return (
+        <div className="bg-blue-50 p-4 rounded-lg shadow-inner">
+            <div className="flex justify-between items-center mb-4">
+                <button onClick={prevMonth} className="p-2 rounded-full hover:bg-blue-200">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-blue-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                    </svg>
+                </button>
+                <h4 className="text-lg font-semibold text-blue-800">
+                    {monthNames[currentMonth.getMonth()]} {currentMonth.getFullYear()}
+                </h4>
+                <button onClick={nextMonth} className="p-2 rounded-full hover:bg-blue-200">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-blue-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                    </svg>
+                </button>
+            </div>
+            <div className="grid grid-cols-7 text-center text-sm font-semibold text-gray-600 mb-2">
+                {dayNames.map(day => <div key={day} className="py-2">{day}</div>)}
+            </div>
+            <div className="grid grid-cols-7 gap-1">
+                {blanks.map((_, i) => <div key={`blank-${i}`} className="p-2"></div>)}
+                {days.map(day => {
+                    const date = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), day);
+                    const behaviorSummary = getBehaviorForDate(date); // Get summarized behavior for icon
+                    let bgColor = 'bg-white';
+                    let textColor = 'text-gray-800';
+                    let icon = null;
+
+                    if (behaviorSummary) {
+                        switch (behaviorSummary.type) {
+                            case 'Bueno':
+                                bgColor = 'bg-green-200';
+                                icon = '👍'; // Thumbs up emoji
+                                break;
+                            case 'Regular':
+                                bgColor = 'bg-yellow-200';
+                                icon = '😐'; // Neutral face emoji
+                                break;
+                            case 'Equivocado':
+                                bgColor = 'bg-red-200';
+                                icon = '👎'; // Thumbs down emoji
+                                break;
+                            default:
+                                break;
+                        }
+                    }
+
+                    const today = new Date();
+                    const isToday = date.toDateString() === today.toDateString();
+
+                    return (
+                        <div
+                            key={day}
+                            className={`p-2 rounded-lg flex flex-col items-center justify-center cursor-pointer hover:bg-blue-100 transition-colors duration-200 ${bgColor} ${isToday ? 'border-2 border-blue-500 shadow-md' : ''}`}
+                            onClick={() => onDateClick(date)}
+                            // title={behavior ? behavior.comment : 'Añadir comportamiento'} // Comment won't work with summary
+                        >
+                            <span className={`font-medium ${textColor}`}>{day}</span>
+                            {icon && <span className="text-xl mt-1">{icon}</span>}
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+    );
+};
+
+
+// Behavior Form Modal Component
+const BehaviorForm = ({ childId, selectedDate, onClose, dailyRecords }) => {
+    const { db, userId } = useContext(AppContext);
+    const [type, setType] = useState('');
+    const [comment, setComment] = useState('');
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
+
+    // Sort daily records by timestamp for consistent display
+    const sortedDailyRecords = dailyRecords.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        setError('');
+        if (!type) {
+            setError('Por favor, selecciona un tipo de comportamiento.');
+            return;
+        }
+
+        setLoading(true);
+        try {
+            const behaviorColRef = collection(db, `artifacts/${typeof __app_id !== 'undefined' ? __app_id : 'default-app-id'}/users/${userId}/behavior`);
+            const recordData = {
+                childId,
+                date: selectedDate.toISOString().split('T')[0], // Store as YYYY-MM-DD
+                type,
+                comment,
+                timestamp: new Date().toISOString(), // For sorting/tracking when added/modified
+            };
+
+            await addDoc(behaviorColRef, recordData); // Always add a new record
+            showMessage("Éxito", "Registro de comportamiento guardado.");
+            setType(''); // Clear form after submission
+            setComment('');
+            // No need to close modal immediately, user might want to add more
+        } catch (err) {
+            console.error("Error saving behavior record:", err);
+            setError(`Error al guardar el registro: ${err.message}`);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleDeleteRecord = async (recordId) => {
+        setError('');
+        setLoading(true);
+        try {
+            const recordDocRef = doc(db, `artifacts/${typeof __app_id !== 'undefined' ? __app_id : 'default-app-id'}/users/${userId}/behavior`, recordId);
+            await deleteDoc(recordDocRef);
+            showMessage("Éxito", "Registro de comportamiento eliminado.");
+        } catch (err) {
+            console.error("Error deleting behavior record:", err);
+            setError(`Error al eliminar el registro: ${err.message}`);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white p-6 rounded-lg shadow-xl max-w-md w-full animate-fade-in-up">
+                <h3 className="text-xl font-bold text-gray-800 mb-4">
+                    Registrar Comportamiento para {selectedDate.toLocaleDateString('es-ES')}
+                </h3>
+
+                {sortedDailyRecords.length > 0 && (
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4 max-h-48 overflow-y-auto">
+                        <h4 className="text-md font-semibold text-gray-800 mb-2">Comportamientos del día ya registrados:</h4>
+                        {sortedDailyRecords.map(record => (
+                            <div key={record.id} className="border-b border-blue-100 last:border-b-0 py-2 flex justify-between items-center">
+                                <div>
+                                    <p className="text-lg font-bold text-blue-700">Tipo: {record.type}</p>
+                                    <p className="text-gray-700 italic text-sm">Comentario: {record.comment || 'Ninguno'}</p>
+                                    <p className="text-gray-500 text-xs mt-1">Hora: {new Date(record.timestamp).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}</p>
+                                </div>
+                                <button
+                                    onClick={() => handleDeleteRecord(record.id)}
+                                    className="text-red-500 hover:text-red-700 p-1 rounded-full hover:bg-red-100 transition-colors"
+                                    title="Eliminar registro"
+                                    disabled={loading}
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                    </svg>
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                )}
+
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    <div>
+                        <label className="block text-gray-700 text-sm font-bold mb-2">
+                            Tipo de Comportamiento (nuevo registro):
+                        </label>
+                        <div className="flex gap-3 flex-wrap">
+                            {['Bueno', 'Regular', 'Equivocado'].map((behaviorType) => (
+                                <button
+                                    key={behaviorType}
+                                    type="button"
+                                    onClick={() => setType(behaviorType)}
+                                    className={`
+                                        py-2 px-4 rounded-lg font-semibold border-2
+                                        ${type === behaviorType
+                                            ? (behaviorType === 'Bueno' ? 'bg-green-500 text-white border-green-600' :
+                                               behaviorType === 'Regular' ? 'bg-yellow-500 text-gray-900 border-yellow-600' :
+                                               'bg-red-500 text-white border-red-600')
+                                            : (behaviorType === 'Bueno' ? 'bg-green-100 text-green-700 border-green-200 hover:bg-green-200' :
+                                               behaviorType === 'Regular' ? 'bg-yellow-100 text-yellow-700 border-yellow-200 hover:bg-yellow-200' :
+                                               'bg-red-100 text-red-700 border-red-200 hover:bg-red-200')
+                                        }
+                                        transition-colors duration-200
+                                    `}
+                                    disabled={loading}
+                                >
+                                    {behaviorType}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                    <div>
+                        <label htmlFor="comment" className="block text-gray-700 text-sm font-bold mb-2">
+                            Comentario (opcional para nuevo registro):
+                        </label>
+                        <textarea
+                            id="comment"
+                            value={comment}
+                            onChange={(e) => setComment(e.target.value)}
+                            rows="3" // Smaller rows for new input
+                            className="shadow appearance-none border rounded-lg w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-400"
+                            placeholder="Añade detalles sobre el comportamiento..."
+                            disabled={loading}
+                        ></textarea>
+                    </div>
+                    {error && <p className="text-red-500 text-sm italic">{error}</p>}
+                    <div className="flex justify-between gap-2 mt-6">
+                        <button
+                            type="button"
+                            onClick={onClose}
+                            className="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-lg shadow-md transition duration-300"
+                            disabled={loading}
+                        >
+                            Cerrar
+                        </button>
+                        <button
+                            type="submit"
+                            className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg shadow-md transition duration-300 flex items-center gap-2"
+                            disabled={loading || !type} // Disable save if no type selected
+                        >
+                            {loading && (
+                                <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                            )}
+                            Añadir Registro
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+};
+
+// Behavior Statistics Component
+const BehaviorStatistics = ({ records }) => {
+    const [filter, setFilter] = useState('week'); // 'day', 'week', 'month', 'year'
+    const [stats, setStats] = useState({ Bueno: 0, Regular: 0, Equivocado: 0, total: 0 });
+
+    useEffect(() => {
+        const calculateStats = () => {
+            const now = new Date();
+            let filteredRecords = [];
+
+            records.forEach(record => {
+                const recordDate = new Date(record.date);
+                if (isNaN(recordDate)) {
+                    console.warn(`Invalid date format for record: ${record.date}`);
+                    return;
+                }
+
+                if (filter === 'day') {
+                    // Filter for the current day
+                    if (recordDate.getDate() === now.getDate() &&
+                        recordDate.getMonth() === now.getMonth() &&
+                        recordDate.getFullYear() === now.getFullYear()) {
+                        filteredRecords.push(record);
+                    }
+                } else if (filter === 'week') {
+                    // Start of current week (Monday)
+                    const startOfWeek = new Date(now);
+                    startOfWeek.setDate(now.getDate() - (now.getDay() === 0 ? 6 : now.getDay() - 1)); // Adjust for Monday start (0=Sun, 1=Mon...6=Sat)
+                    startOfWeek.setHours(0, 0, 0, 0);
+
+                    // End of current week (Sunday)
+                    const endOfWeek = new Date(startOfWeek);
+                    endOfWeek.setDate(startOfWeek.getDate() + 6);
+                    endOfWeek.setHours(23, 59, 59, 999);
+
+                    if (recordDate >= startOfWeek && recordDate <= endOfWeek) {
+                        filteredRecords.push(record);
+                    }
+                } else if (filter === 'month') {
+                    if (recordDate.getMonth() === now.getMonth() && recordDate.getFullYear() === now.getFullYear()) {
+                        filteredRecords.push(record);
+                    }
+                } else if (filter === 'year') {
+                    if (recordDate.getFullYear() === now.getFullYear()) {
+                        filteredRecords.push(record);
+                    }
+                }
+            });
+
+            const counts = { Bueno: 0, Regular: 0, Equivocado: 0 };
+            filteredRecords.forEach(record => {
+                if (counts.hasOwnProperty(record.type)) {
+                    counts[record.type]++;
+                }
+            });
+
+            setStats({
+                Bueno: counts.Bueno,
+                Regular: counts.Regular,
+                Equivocado: counts.Equivocado,
+                total: filteredRecords.length,
+            });
+        };
+
+        calculateStats();
+    }, [records, filter]);
+
+
+    const total = stats.total;
+    const goodPercentage = total > 0 ? (stats.Bueno / total) * 100 : 0;
+    const regularPercentage = total > 0 ? (stats.Regular / total) * 100 : 0;
+    const wrongPercentage = total > 0 ? (stats.Equivocado / total) * 100 : 0;
+
+    return (
+        <div className="bg-blue-50 p-4 rounded-lg shadow-inner">
+            <div className="flex justify-around mb-4 bg-white p-2 rounded-lg shadow-sm">
+                <button
+                    onClick={() => setFilter('day')}
+                    className={`py-2 px-4 rounded-lg font-semibold transition-colors duration-200 ${filter === 'day' ? 'bg-blue-500 text-white shadow-md' : 'text-blue-700 hover:bg-blue-100'}`}
+                >
+                    Día
+                </button>
+                <button
+                    onClick={() => setFilter('week')}
+                    className={`py-2 px-4 rounded-lg font-semibold transition-colors duration-200 ${filter === 'week' ? 'bg-blue-500 text-white shadow-md' : 'text-blue-700 hover:bg-blue-100'}`}
+                >
+                    Semana
+                </button>
+                <button
+                    onClick={() => setFilter('month')}
+                    className={`py-2 px-4 rounded-lg font-semibold transition-colors duration-200 ${filter === 'month' ? 'bg-blue-500 text-white shadow-md' : 'text-blue-700 hover:bg-blue-100'}`}
+                >
+                    Mes
+                </button>
+                <button
+                    onClick={() => setFilter('year')}
+                    className={`py-2 px-4 rounded-lg font-semibold transition-colors duration-200 ${filter === 'year' ? 'bg-blue-500 text-white shadow-md' : 'text-blue-700 hover:bg-blue-100'}`}
+                >
+                    Año
+                </button>
+            </div>
+
+            {total === 0 ? (
+                <p className="text-center text-gray-600 py-4">No hay registros de comportamiento para este período.</p>
+            ) : (
+                <div className="space-y-4">
+                    <div className="flex items-center gap-3">
+                        <div className="w-1/4 text-gray-700 font-semibold">Bueno:</div>
+                        <div className="w-3/4 bg-green-300 rounded-full h-8 flex items-center overflow-hidden">
+                            <div
+                                className="bg-green-600 h-full rounded-full text-white text-xs font-bold flex items-center justify-center transition-all duration-500 ease-out"
+                                style={{ width: `${goodPercentage}%` }}
+                            >
+                                {stats.Bueno > 0 && `${goodPercentage.toFixed(0)}%`}
+                            </div>
+                            {stats.Bueno === 0 && <span className="pl-3 text-gray-800">{goodPercentage.toFixed(0)}%</span>}
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                        <div className="w-1/4 text-gray-700 font-semibold">Regular:</div>
+                        <div className="w-3/4 bg-yellow-300 rounded-full h-8 flex items-center overflow-hidden">
+                            <div
+                                className="bg-yellow-600 h-full rounded-full text-gray-900 text-xs font-bold flex items-center justify-center transition-all duration-500 ease-out"
+                                style={{ width: `${regularPercentage}%` }}
+                            >
+                                {stats.Regular > 0 && `${regularPercentage.toFixed(0)}%`}
+                            </div>
+                            {stats.Regular === 0 && <span className="pl-3 text-gray-800">{regularPercentage.toFixed(0)}%</span>}
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                        <div className="w-1/4 text-gray-700 font-semibold">Equivocado:</div>
+                        <div className="w-3/4 bg-red-300 rounded-full h-8 flex items-center overflow-hidden">
+                            <div
+                                className="bg-red-600 h-full rounded-full text-white text-xs font-bold flex items-center justify-center transition-all duration-500 ease-out"
+                                style={{ width: `${wrongPercentage}%` }}
+                            >
+                                {stats.Equivocado > 0 && `${wrongPercentage.toFixed(0)}%`}
+                            </div>
+                            {stats.Equivocado === 0 && <span className="pl-3 text-gray-800">{wrongPercentage.toFixed(0)}%</span>}
+                        </div>
+                    </div>
+
+                    <div className="mt-6 pt-4 border-t border-gray-200 text-center text-lg font-bold text-gray-800">
+                        Total de Registros: {total}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
+
+
+export default App;
